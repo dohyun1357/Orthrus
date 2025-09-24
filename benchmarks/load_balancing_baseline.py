@@ -12,8 +12,8 @@ import time
 from typing import Any, Dict, List, Tuple
 
 try:
-    import pynvml  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
+    import pynvml
+except Exception:
     pynvml = None
 
 os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
@@ -36,13 +36,6 @@ for _name in [
 
 from baseline import BaselineAsyncWrapper
 
-_WORDS = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
-    "golf", "hotel", "india", "juliet", "kilo", "lima",
-    "mike", "november", "oscar", "papa", "quebec", "romeo",
-    "sierra", "tango", "uniform", "victor", "whiskey", "xray",
-    "yankee", "zulu"
-]
 
 _PHASE_SPEC: List[Tuple[str, int, int]] = [
     ("gen_9_embed_1", 9, 1),
@@ -51,9 +44,11 @@ _PHASE_SPEC: List[Tuple[str, int, int]] = [
 ]
 
 
+
 def _make_word_payload(width: int, seed: int) -> str:
-    random.seed(seed)
-    return " ".join(random.choices(_WORDS, k=width))
+    base = "lorem"
+    return " ".join(f"{base}{i%1000}" for i in range(max(1, width)))
+
 
 
 def _allocate_counts(total: int, gen_weight: int, embed_weight: int) -> Tuple[int, int]:
@@ -68,13 +63,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Orthrus load-balancing experiment (baseline)")
     parser.add_argument("--total-requests", type=int, default=1000, help="Requests dispatched per phase")
     parser.add_argument("--phase-seconds", type=int, default=180, help="Duration budget per phase in seconds")
-    parser.add_argument("--concurrency", type=int, default=128, help="Maximum concurrent in-flight requests")
+    parser.add_argument("--concurrency", type=int, default=256, help="Maximum concurrent in-flight requests")
     parser.add_argument("--seed", type=int, default=123, help="Random seed for payload shuffling")
     parser.add_argument("--embed-model", type=str, default="intfloat/e5-mistral-7b-instruct")
     parser.add_argument("--gen-model", type=str, default="mistralai/Mistral-7B-v0.1")
     parser.add_argument("--embed-gpu", type=int, default=0)
     parser.add_argument("--num-gpus", type=int, default=4)
-    parser.add_argument("--worker-concurrency", type=int, default=32)
     parser.add_argument("--max-gen-tokens", type=int, default=150)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--sampling-period", type=float, default=1.0, help="GPU telemetry sampling period seconds")
@@ -114,7 +108,7 @@ async def _gpu_sampler(
     for idx in gpu_indices:
         try:
             handles[idx] = pynvml.nvmlDeviceGetHandleByIndex(idx)
-        except Exception as exc:  # pragma: no cover - hardware dependent
+        except Exception as exc:
             raise RuntimeError(f"Failed to acquire NVML handle for GPU {idx}: {exc}") from exc
 
     try:

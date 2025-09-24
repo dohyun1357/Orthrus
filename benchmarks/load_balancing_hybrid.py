@@ -12,8 +12,8 @@ import time
 from typing import Any, Dict, List, Tuple
 
 try:
-    import pynvml  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
+    import pynvml
+except Exception:
     pynvml = None
 
 os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
@@ -36,14 +36,6 @@ for _name in [
 
 from hybrid import HybridAsyncWrapper
 
-_WORDS = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
-    "golf", "hotel", "india", "juliet", "kilo", "lima",
-    "mike", "november", "oscar", "papa", "quebec", "romeo",
-    "sierra", "tango", "uniform", "victor", "whiskey", "xray",
-    "yankee", "zulu"
-]
-
 _PHASE_SPEC: List[Tuple[str, int, int]] = [
     ("gen_9_embed_1", 9, 1),
     ("gen_1_embed_1", 1, 1),
@@ -51,9 +43,10 @@ _PHASE_SPEC: List[Tuple[str, int, int]] = [
 ]
 
 
+
 def _make_word_payload(width: int, seed: int) -> str:
-    random.seed(seed)
-    return " ".join(random.choices(_WORDS, k=width))
+    base = "lorem"
+    return " ".join(f"{base}{i%1000}" for i in range(max(1, width)))
 
 
 def _allocate_counts(total: int, gen_weight: int, embed_weight: int) -> Tuple[int, int]:
@@ -66,7 +59,7 @@ def _allocate_counts(total: int, gen_weight: int, embed_weight: int) -> Tuple[in
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Orthrus load-balancing experiment (hybrid)")
-    parser.add_argument("--total-requests", type=int, default=1000, help="Requests dispatched per phase")
+    parser.add_argument("--total-requests", type=int, default=250, help="Requests dispatched per phase")
     parser.add_argument("--phase-seconds", type=int, default=180, help="Duration budget per phase in seconds")
     parser.add_argument("--concurrency", type=int, default=64, help="Maximum concurrent in-flight requests")
     parser.add_argument("--seed", type=int, default=123, help="Random seed for payload shuffling")
@@ -112,7 +105,7 @@ async def _gpu_sampler(
     for idx in gpu_indices:
         try:
             handles[idx] = pynvml.nvmlDeviceGetHandleByIndex(idx)
-        except Exception as exc:  # pragma: no cover - hardware dependent
+        except Exception as exc:
             raise RuntimeError(f"Failed to acquire NVML handle for GPU {idx}: {exc}") from exc
 
     try:
@@ -130,7 +123,6 @@ async def _gpu_sampler(
             except asyncio.TimeoutError:
                 continue
     finally:
-        # final snapshot after stop to capture tail utilisation
         rel = time.perf_counter() - start_perf
         for idx, handle in handles.items():
             try:

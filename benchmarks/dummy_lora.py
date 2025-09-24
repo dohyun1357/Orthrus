@@ -119,4 +119,5 @@ def generate_dummy_lora(
     )
 
     adapter_id = f"{safe_model}_r{rank}"
+    print(f"Generated dummy LoRA adapter at {adapter_dir} with ID {adapter_id}, rank {rank}")
     return DummyLoRAResult(path=adapter_dir, adapter_id=adapter_id, rank=rank)

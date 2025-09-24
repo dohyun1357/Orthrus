@@ -29,18 +29,10 @@ for _name in [
 from hybrid import HybridAsyncWrapper
 
 
-_WORDS = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
-    "golf", "hotel", "india", "juliet", "kilo", "lima",
-    "mike", "november", "oscar", "papa", "quebec", "romeo",
-    "sierra", "tango", "uniform", "victor", "whiskey", "xray",
-    "yankee", "zulu"
-]
 
 def _make_word_payload(width: int, seed: int) -> str:
-    random.seed(seed)
-    return " ".join(random.choices(_WORDS, k=width))
-
+    base = "lorem"
+    return " ".join(f"{base}{i%1000}" for i in range(max(1, width)))
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Orthrus Fig.1 throughput benchmark")

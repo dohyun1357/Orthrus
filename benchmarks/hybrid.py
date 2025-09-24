@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Hybrid AsyncLLMEngine base wrapper (single GPU, hybrid task)."""
-
 import argparse
 import asyncio
 import contextlib
@@ -31,17 +28,17 @@ for _name in [
 ]:
     logging.getLogger(_name).setLevel(logging.ERROR)
 
-from vllm import AsyncLLMEngine, SamplingParams  # noqa: E402
-from vllm.config import PoolerConfig  # noqa: E402
-from vllm.engine.arg_utils import AsyncEngineArgs  # noqa: E402
-from vllm.lora.request import LoRARequest  # noqa: E402
-from vllm.pooling_params import PoolingParams  # noqa: E402
+from vllm import AsyncLLMEngine, SamplingParams
+from vllm.config import PoolerConfig
+from vllm.engine.arg_utils import AsyncEngineArgs
+from vllm.lora.request import LoRARequest
+from vllm.pooling_params import PoolingParams
 
-from transformers import AutoTokenizer  # noqa: E402
+from transformers import AutoTokenizer
 
 try:
-    import pynvml  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
+    import pynvml
+except Exception:
     pynvml = None
 
 
@@ -418,54 +415,3 @@ class HybridAsyncWrapper:
             writer.writeheader()
             for row in self._request_log:
                 writer.writerow(row)
-
-__all__ = ["HybridAsyncWrapper"]
-
-
-async def _demo(args: argparse.Namespace) -> None:
-    wrapper = HybridAsyncWrapper(
-        embed_gpu=args.gpu,
-        embed_model=args.model,
-        gen_model=args.model,
-        lora_path=args.lora_path,
-        lora_adapter_id=args.lora_adapter_id,
-    )
-    await wrapper.start()
-    try:
-        texts = ["UIUC is in Urbana-Champaign.", "Orthrus hybrid wrapper demo"]
-        embeddings = await wrapper.embed(texts)
-        print(f"[hybrid] embed success: {sum(1 for e in embeddings if e is not None)} / {len(texts)}")
-
-        generations = await wrapper.generate([
-            "Summarize the purpose of the Orthrus hybrid benchmark wrapper."], max_tokens=args.max_tokens)
-        for idx, gen in enumerate(generations):
-            print(f"[hybrid] gen[{idx}]: {gen[:120].strip()}...")
-    finally:
-        await wrapper.stop()
-
-    wrapper.write_request_trace_csv("hybrid_request_trace.csv")
-    
-    metrics = wrapper.get_metrics()
-    runtime = metrics.get("runtime_sec")
-    if runtime is not None:
-        print(f"[metrics] runtime={runtime:.2f}s")
-    for kind, info in metrics.get("requests", {}).items():
-        line = f"[metrics] {kind}: count={info.get('count', 0)}"
-        avg = info.get("avg_latency_ms")
-        if avg is not None:
-            line += f" avg={avg:.2f}ms"
-        print(line)
-
-
-def _parse() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Hybrid AsyncLLMEngine wrapper demo")
-    parser.add_argument("--gpu", type=int, default=0)
-    parser.add_argument("--model", type=str, default="mistralai/Mistral-7B-v0.1")
-    parser.add_argument("--lora-path", type=str, default="../e5-mistral-7b-instruct/lora")
-    parser.add_argument("--lora-adapter-id", type=str, default="e5_adapter")
-    parser.add_argument("--max-tokens", type=int, default=128)
-    return parser.parse_args()
-
-
-if __name__ == "__main__":
-    asyncio.run(_demo(_parse()))

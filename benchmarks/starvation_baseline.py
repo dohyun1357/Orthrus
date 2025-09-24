@@ -7,7 +7,6 @@ import os
 import random
 import statistics
 import sys
-import time
 from typing import Any, Dict, List
 
 os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
@@ -30,17 +29,10 @@ for _name in [
 
 from baseline import BaselineAsyncWrapper
 
-_WORDS = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
-    "golf", "hotel", "india", "juliet", "kilo", "lima",
-    "mike", "november", "oscar", "papa", "quebec", "romeo",
-    "sierra", "tango", "uniform", "victor", "whiskey", "xray",
-    "yankee", "zulu"
-]
 
 def _make_word_payload(width: int, seed: int) -> str:
-    random.seed(seed)
-    return " ".join(random.choices(_WORDS, k=width))
+    base = "lorem"
+    return " ".join(f"{base}{i%1000}" for i in range(max(1, width)))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -66,6 +58,14 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _collect_latencies(metrics: Dict[str, Any], kind: str) -> List[float]:
+    per_gpu = metrics.get("requests", {}).get(kind, {}).get("per_gpu", {})
+    latencies: List[float] = []
+    for gpu_metrics in per_gpu.values():
+        latencies.extend(gpu_metrics.get("latencies", []))
+    return [lat * 1000.0 for lat in latencies]
+
+
 async def _run_benchmark(args: argparse.Namespace) -> Dict[str, Any]:
     random.seed(args.seed)
 
@@ -84,39 +84,28 @@ async def _run_benchmark(args: argparse.Namespace) -> Dict[str, Any]:
         enable_gpu_telemetry=args.telemetry,
     )
     await wrapper.start()
-
-    latencies_gen_ms: List[float] = []
-    latencies_embed_ms: List[float] = []
-
-    async def _submit_gen(payload: str) -> bool:
-        start = time.perf_counter()
-        outs = await wrapper.generate([payload], temperature=args.temperature, max_tokens=args.max_gen_tokens)
-        if outs and outs[0] is not None:
-            latencies_gen_ms.append((time.perf_counter() - start) * 1000.0)
-            return True
-        return False
-
-    async def _submit_embed(payload: str) -> bool:
-        start = time.perf_counter()
-        vecs = await wrapper.embed([payload])
-        if vecs and vecs[0] is not None:
-            latencies_embed_ms.append((time.perf_counter() - start) * 1000.0)
-            return True
-        return False
-
+    print("Wrapper started", file=sys.stderr)
+    await asyncio.sleep(180.0)  # let things settle
+    print("Starting benchmark...", file=sys.stderr)
     try:
         tasks: List[asyncio.Task[Any]] = []
         prompt_seed = args.seed * 41 + 5
         for idx in range(args.num_gen):
             seed = prompt_seed + idx
-            payload = _make_word_payload(128, seed)
-            tasks.append(asyncio.create_task(_submit_gen(payload)))
+            payload = _make_word_payload(512, seed)
+            tasks.append(
+                asyncio.create_task(
+                    wrapper.generate([payload], temperature=args.temperature, max_tokens=args.max_gen_tokens)
+                )
+            )
 
         embed_seed = args.seed * 59 + 23
         for idx in range(args.num_embed):
             seed = embed_seed + idx
             payload = _make_word_payload(128, seed)
-            tasks.append(asyncio.create_task(_submit_embed(payload)))
+            tasks.append(asyncio.create_task(wrapper.embed([payload])))
+        
+        print(f"Issued {len(tasks)} tasks, waiting for completion...", file=sys.stderr)
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         errors = [res for res in results if isinstance(res, Exception)]
@@ -128,20 +117,15 @@ async def _run_benchmark(args: argparse.Namespace) -> Dict[str, Any]:
     if args.trace_csv:
         wrapper.write_request_trace_csv(args.trace_csv)
 
-    gen_results = results[:args.num_gen]
-    embed_results = results[args.num_gen:]
-    gen_failures = sum(1 for res in gen_results if res is not True)
-    embed_failures = sum(1 for res in embed_results if res is not True)
+    metrics = wrapper.get_metrics()
+    latencies_gen_ms = _collect_latencies(metrics, "gen")
+    latencies_embed_ms = _collect_latencies(metrics, "embed")
 
     summary = {
         "num_gen": args.num_gen,
         "num_embed": args.num_embed,
         "latencies_gen_ms": latencies_gen_ms,
         "latencies_embed_ms": latencies_embed_ms,
-        "completed_gen": len(latencies_gen_ms),
-        "completed_embed": len(latencies_embed_ms),
-        "gen_failures": gen_failures,
-        "embed_failures": embed_failures,
     }
 
     if args.latency_csv:
@@ -166,14 +150,8 @@ def main() -> None:
         print(json.dumps(summary))
     else:
         print("=== Starvation Benchmark (Baseline) ===")
-        print(
-            f"generation requests: {summary['num_gen']} -> "
-            f"completed={summary['completed_gen']} failures={summary['gen_failures']}"
-        )
-        print(
-            f"embedding requests: {summary['num_embed']} -> "
-            f"completed={summary['completed_embed']} failures={summary['embed_failures']}"
-        )
+        print(f"generation requests: {summary['num_gen']} -> completed={len(summary['latencies_gen_ms'])}")
+        print(f"embedding requests: {summary['num_embed']} -> completed={len(summary['latencies_embed_ms'])}")
         if summary['latencies_gen_ms']:
             print(
                 "gen latency ms (min/p50/max): "

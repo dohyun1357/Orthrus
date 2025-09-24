@@ -11,23 +11,19 @@ os.environ.setdefault("VLLM_LOGGING_LEVEL", "ERROR")
 
 try:
     import pynvml
-except Exception:  # pragma: no cover - optional
+except Exception:
     pynvml = None
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-# ---------------------------
-# Server launch configuration
-# ---------------------------
-
 @dataclass
 class ServerSpec:
     kind: str                 # "embed" or "gen"
     gpu_index: int
     model_id: str
-    pooling_type: str = "MEAN"          # for embeddings
+    pooling_type: str = "MEAN"
     max_model_len: int = 4096
     gpu_mem_util: float = 0.90
     tensor_parallel_size: int = 1
@@ -46,21 +42,7 @@ class _ServerHandle:
 
 ServerSpecLike = Union[ServerSpec, Dict[str, Any]]
 
-
-# ---------------------------
-# Parent-side async wrapper
-# ---------------------------
-
 class BaselineAsyncWrapper:
-    """
-    Baseline wrapper (Async):
-      - >=1 embed workers (each 1 GPU)
-      - N gen workers (each 1 GPU; can reuse the embed GPU when N == 1)
-      - Async .embed() and .generate() APIs
-      - Centralized response dispatch to avoid stolen-response deadlocks
-      - Concurrent consumers inside workers so vLLM can batch
-    """
-
     def __init__(
         self,
         *,
@@ -159,20 +141,16 @@ class BaselineAsyncWrapper:
         else:
             self.gen_specs = []
 
-        # HTTP server handles
         self._embed_servers: List[_ServerHandle] = []
         self._gen_servers: List[_ServerHandle] = []
         self._embed_clients: List[httpx.AsyncClient] = []
         self._gen_clients: List[httpx.AsyncClient] = []
         self._server_processes: List[subprocess.Popen] = []
-        self._http_timeout = httpx.Timeout(timeout=60.0, connect=10.0, read=None)
-
-        # Tokenizer optional (not used here, left out to keep it lean)
+        self._http_timeout = httpx.Timeout(timeout=600.0, connect=10.0, read=None)
 
         self._started: bool = False
         self._stopping: bool = False
         
-        # Metrics & telemetry
         self._metrics: Dict[str, Any] = {
             "start_time": None,
             "stop_time": None,
@@ -197,7 +175,7 @@ class BaselineAsyncWrapper:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             return int(sock.getsockname()[1])
 
-    async def _wait_for_server(self, port: int, timeout: float = 120.0) -> None:
+    async def _wait_for_server(self, port: int, timeout: float = 600.0) -> None:
         url = f"http://127.0.0.1:{port}/health"
         deadline = time.time() + timeout
         async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0, read=2.0)) as client:
@@ -380,7 +358,6 @@ class BaselineAsyncWrapper:
         await self._close_http_clients()
         await self._terminate_processes()
 
-        # Shutdown GPU telemetry
         if self._gpu_poll_task is not None:
             self._gpu_poll_task.cancel()
             with contextlib.suppress(Exception):
@@ -392,11 +369,8 @@ class BaselineAsyncWrapper:
                 pynvml.nvmlShutdown()
         self._gpu_handles = {}
 
-        # Reset handles so the wrapper can be started again cleanly
         self._metrics["stop_time"] = time.time()
         self._started = False
-
-    # --------- APIs ---------
 
     def _pick_embed_index(self) -> int:
         if not self._embed_servers:

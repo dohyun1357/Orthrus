@@ -29,17 +29,9 @@ for _name in [
 from baseline import BaselineAsyncWrapper  # noqa: E402
 
 
-_WORDS = [
-    "alpha", "bravo", "charlie", "delta", "echo", "foxtrot",
-    "golf", "hotel", "india", "juliet", "kilo", "lima",
-    "mike", "november", "oscar", "papa", "quebec", "romeo",
-    "sierra", "tango", "uniform", "victor", "whiskey", "xray",
-    "yankee", "zulu"
-]
-
 def _make_word_payload(width: int, seed: int) -> str:
-    random.seed(seed)
-    return " ".join(random.choices(_WORDS, k=width))
+    base = "lorem"
+    return " ".join(f"{base}{i%1000}" for i in range(max(1, width)))
 
 
 def _comma_separated_ints(value: str) -> List[int]:
@@ -57,7 +49,7 @@ def _comma_separated_ints(value: str) -> List[int]:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Orthrus Fig.1 baseline throughput benchmark")
-    parser.add_argument("--clients", type=int, default=256)
+    parser.add_argument("--clients", type=int, default=512)
     parser.add_argument("--ratio-gen", type=float, default=0.5)
     parser.add_argument("--run-seconds", type=int, default=120)
     parser.add_argument("--seed", type=int, default=123)
@@ -72,16 +64,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--embed-gpus",
         type=_comma_separated_ints,
-        default=None,
+        default="0",
         help="Comma-separated list of GPU indices to host embedding models (default auto-selects 2).",
     )
     parser.add_argument(
         "--gen-gpus",
         type=_comma_separated_ints,
-        default=None,
+        default="1,2,3",
         help="Comma-separated list of GPU indices to host generation models (default auto-selects 2).",
     )
-    parser.add_argument("--worker-concurrency", type=int, default=32)
     parser.add_argument("--telemetry", action="store_true", help="Enable NVML GPU telemetry polling")
     parser.add_argument("--csv", action="store_true")
     parser.add_argument("--trace-csv", type=str, default=None)
